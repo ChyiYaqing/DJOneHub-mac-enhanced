@@ -118,12 +118,14 @@ type app struct {
 	// every host-audio callback and media loop.
 	swiftAudioHost bool
 
-	moduleVoiceMu     sync.Mutex
-	moduleVoiceOpMu   sync.Mutex
-	moduleVoiceReady  bool
-	moduleVoiceLast   time.Time
-	moduleVoiceErr    string
-	moduleVoiceDetail string
+	moduleVoiceMu       sync.Mutex
+	moduleVoiceOpMu     sync.Mutex
+	moduleVoiceSession  *moduleVoiceSession
+	moduleVoicePrepared bool
+	moduleVoiceReady    bool
+	moduleVoiceLast     time.Time
+	moduleVoiceErr      string
+	moduleVoiceDetail   string
 
 	moduleSetupMu sync.RWMutex
 	moduleSetup   moduleSetupStatus
@@ -468,6 +470,7 @@ func serve(instance *app, listen string) {
 	defer stop()
 	if !instance.demo {
 		go instance.startCellularPolicyGuard(ctx)
+		go instance.kickModuleVoice()
 	}
 
 	if !instance.demo {
@@ -970,6 +973,7 @@ func (a *app) markUSBATDetached(reason string) {
 	// A module reboot or re-enumeration can change USBCFG outside this process.
 	// Do not keep reporting a previously cached "ready" state in that case.
 	a.invalidateReadyModuleSetup()
+	go a.resetModuleVoiceSession()
 	a.callMu.Lock()
 	a.callConfigured = false
 	a.callMu.Unlock()
