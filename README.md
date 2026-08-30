@@ -6,7 +6,7 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 
 ## 文档导航
 
-- [当前版本与更新](#v129v125--v129-更新汇总)
+- [当前版本与更新](#v1210iphone--ipad-网络唤醒)
 - [版本演进](#版本演进)
 - [下载与安装](#下载与平台状态)
 - [完整使用说明](#完整使用说明)
@@ -14,7 +14,16 @@ DJOneHub 是一个非官方开源项目。它通过模块已有 USB 接口提供
 - [日志卸载与故障排查](#日志与本地数据)
 - [从源码构建](#从源码构建)
 
-主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.9 章节为准。
+主页同时保留当前版本说明和早期使用文档。标有“历史”的内容用于说明版本演进；当前安装与操作请以 v1.2.10 章节为准。
+
+## v1.2.10：iPhone / iPad 网络唤醒
+
+[下载 v1.2.10](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.10)
+
+- 切换到 iPhone/iPad 模式时，由 Mac 一次性安装公开的模块侧网络唤醒服务；手机无需安装 DJOneHub App。
+- 手机锁屏、普通 App 被系统挂起后，模块仍维持 USB ECM 与蜂窝数据链路，减少长时间空闲后断网。
+- 拔出移动设备或恢复 Mac 完整模式后自动停止活跃保留并释放 wake lock。
+- 首次启用需要模块当前以带 ADB 的 Mac 模式连接；安装完成后可脱离 Mac 使用。
 
 ## v1.2.9：v1.2.5 — v1.2.9 更新汇总
 
@@ -65,6 +74,7 @@ DJOneHub 从本机网页工具逐步演进为独立 macOS App。早期能力没�
 | v1.2.4 | 重构为独立 App，整合拨号、通话、短信、通讯录、设置和系统提醒。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.4) · [发布说明](docs/RELEASE_NOTES_v1.2.4.md) |
 | v1.2.5 — v1.2.8 | 增加语音运行时确认下载、移动设备模式，并持续修复首次启用与下载恢复。 | [Releases](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases) |
 | v1.2.9 | 修复 USB 配置识别、安装包混入旧通知 App 和连接模式入口问题。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.9) |
+| v1.2.10 | 增加不依赖手机 App 的模块侧 USB/蜂窝网络唤醒。 | [Release](https://github.com/rogerbush007-a11y/DJOneHub-mac-enhanced/releases/tag/v1.2.10) |
 
 v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/README-v0.1.7-preview.md`](docs/history/README-v0.1.7-preview.md)，可用于核对早期安装方式、界面和设计边界。
 
@@ -126,7 +136,7 @@ v0.1.7-preview 时期的 487 行完整主页已原样保存在 [`docs/history/RE
 
 | 平台 | 包 | 当前状态 |
 | --- | --- | --- |
-| macOS 13+ | `DJOneHub-macOS-universal-v1.2.9.dmg` | Apple Silicon 实机验证；包内含 arm64 + x86_64，Intel 尚未真机验证。 |
+| macOS 13+ | `DJOneHub-macOS-universal-v1.2.10.dmg` | Apple Silicon 构建验证；模块网络唤醒仍需 iPhone/iPad 实机长时间锁屏验收。 |
 | Windows x86-64 | `DJOneHub-Windows-amd64-v1.2.9.zip` | 内含 `DJOneHub.exe`；尚未在真实 Windows + 模块上验证。 |
 
 Windows 目前不承诺模块功能可用；它不提供 macOS 专用的 USB AT/eSIM、USB 4G 自动策略、原生通知、MapKit 或双向通话音频。
@@ -369,11 +379,11 @@ Mac 双向通话仍需要模块侧语音运行时。该运行时**不随本仓�
 
 ```sh
 # macOS Universal
-scripts/package-macos-universal.sh v1.2.9
-scripts/build-dmg-universal.sh v1.2.9
+scripts/package-macos-universal.sh v1.2.10
+scripts/build-dmg-universal.sh v1.2.10
 
 # Windows x86-64
-scripts/package-windows-amd64.sh v1.2.9
+scripts/package-windows-amd64.sh v1.2.10
 ```
 
 构建 macOS 包需要完整 Xcode、Go、`pkg-config` 与网络下载官方 libusb 源码。Windows 包在 Mac 上只能交叉编译，不能替代 Windows 真机验证。

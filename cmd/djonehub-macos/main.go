@@ -39,6 +39,8 @@ import (
 //go:embed web/*
 var webAssets embed.FS
 
+const appVersion = "1.2.10"
+
 type receivedSMS struct {
 	Sender    string    `json:"sender"`
 	Content   string    `json:"content"`
@@ -1150,7 +1152,7 @@ func (a *app) routes() http.Handler {
 
 func (a *app) platformInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":               "1.2.4",
+		"version":               appVersion,
 		"os":                    runtime.GOOS,
 		"web_console":           runtime.GOOS == "windows" || a.webConsole,
 		"call_audio":            runtime.GOOS == "darwin",
@@ -2639,6 +2641,19 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	a.usbProfileMu.Lock()
 	defer a.usbProfileMu.Unlock()
+	// Keep standby protection on the module so iOS does not need a companion
+	// app running in the background. Install while the Mac-side ADB function is
+	// still available, before changing the persistent USB profile.
+	if mode == "mobile" {
+		if err := enableModuleNetworkWake(); err != nil {
+			writeError(w, http.StatusBadGateway, fmt.Sprintf("启用模块网络唤醒失败: %v", err))
+			return
+		}
+	} else if err := disableModuleNetworkWake(); err != nil {
+		// Never block restoration of Mac mode. The helper also self-idles as soon
+		// as USB Audio is present, even if ADB is temporarily unavailable here.
+		log.Printf("disable module network wake: %v", err)
+	}
 	config, raw, err := a.readUSBProfile()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

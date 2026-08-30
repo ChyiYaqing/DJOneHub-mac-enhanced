@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-v1.2.9}
+VERSION=${1:-v1.2.10}
 PACKAGE_NAME="DJOneHub-macOS-universal-${VERSION}"
 STAGE_ROOT="${ROOT_DIR}/dist/release"
 STAGE_DIR="${STAGE_ROOT}/${PACKAGE_NAME}"
