@@ -98,6 +98,17 @@ func TestMobileProfileMessageKeepsADBFailureNonBlockingAndVisible(t *testing.T) 
 	}
 }
 
+func TestSignalRecoveryPausesWhileMobileProfileWaitsForReconnect(t *testing.T) {
+	a := &app{usbProfileMobileArmed: true}
+	if !a.signalRecoveryPaused() {
+		t.Fatal("cellular recovery must pause while the mobile profile is armed")
+	}
+	a.usbProfileMobileArmed = false
+	if a.signalRecoveryPaused() {
+		t.Fatal("cellular recovery must resume after the Mac profile is restored")
+	}
+}
+
 func TestParseMacNetworkServices(t *testing.T) {
 	input := `An asterisk (*) denotes that a network service is disabled.
 (1) Wi-Fi

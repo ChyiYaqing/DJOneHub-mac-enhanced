@@ -1007,6 +1007,12 @@ func (a *app) signalRecoveryOnce() {
 	if a.usbAT == nil {
 		return
 	}
+	// Keep discovery active so reconnecting the module to this Mac can trigger
+	// autoEnableMacAudioProfile, but do not run cellular recovery while the
+	// current connection is waiting to be moved to an iPhone or iPad.
+	if a.signalRecoveryPaused() {
+		return
+	}
 
 	reg, signal, err := a.probeCellularHealth()
 	if err != nil {
@@ -1033,6 +1039,12 @@ func (a *app) signalRecoveryOnce() {
 		a.lastNetworkCheck = time.Now()
 		a.ensureCellularDHCP()
 	}
+}
+
+func (a *app) signalRecoveryPaused() bool {
+	a.usbProfileMu.Lock()
+	defer a.usbProfileMu.Unlock()
+	return a.usbProfileMobileArmed
 }
 
 // probeCellularHealth cheaply reads registration and signal without running
