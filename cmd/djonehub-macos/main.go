@@ -2639,15 +2639,23 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "mode must be mobile or mac")
 		return
 	}
+	// Do not let automatic cellular recovery interleave radio or reboot commands
+	// with a persistent USB profile change.
+	a.recoveryMu.Lock()
+	defer a.recoveryMu.Unlock()
 	a.usbProfileMu.Lock()
 	defer a.usbProfileMu.Unlock()
 	// Keep standby protection on the module so iOS does not need a companion
 	// app running in the background. Install while the Mac-side ADB function is
 	// still available, before changing the persistent USB profile.
+	var networkWakeErr error
 	if mode == "mobile" {
-		if err := enableModuleNetworkWake(); err != nil {
-			writeError(w, http.StatusBadGateway, fmt.Sprintf("启用模块网络唤醒失败: %v", err))
-			return
+		networkWakeErr = enableModuleNetworkWake()
+		if networkWakeErr != nil {
+			// Older DJI module firmware can provide USB Audio without exposing ADB.
+			// Network wake is an enhancement; it must not regress the core mobile
+			// profile switch that worked before the helper was introduced.
+			log.Printf("enable module network wake (continuing without it): %v", networkWakeErr)
 		}
 	} else if err := disableModuleNetworkWake(); err != nil {
 		// Never block restoration of Mac mode. The helper also self-idles as soon
@@ -2668,7 +2676,7 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		message := "当前已是 Mac 完整模式"
 		if mode == "mobile" {
-			message = "当前已是 iPhone/iPad 模式；拔插到移动设备后生效"
+			message = mobileProfileMessage(networkWakeErr, true)
 		}
 		writeJSON(w, http.StatusOK, profileStatus(config, raw, false, message))
 		return
@@ -2690,7 +2698,11 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存 iPhone/iPad 模式意图失败: %v", err))
 			return
 		}
-		writeJSON(w, http.StatusAccepted, profileStatus(updated, raw, true, "已保存 iPhone/iPad 模式；现在直接拔出并连接移动设备即可"))
+		// Give the user time to move the cable without the no-service recovery
+		// loop rebooting the module immediately after this successful write.
+		a.lostSignalCount = 0
+		a.lastModemReboot = time.Now()
+		writeJSON(w, http.StatusAccepted, profileStatus(updated, raw, true, mobileProfileMessage(networkWakeErr, false)))
 		return
 	}
 	a.usbProfileMobileArmed = false
@@ -2703,6 +2715,17 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, profileStatus(updated, raw, true, "已恢复 Mac 完整模式，模块正在重新连接"))
+}
+
+func mobileProfileMessage(networkWakeErr error, alreadyConfigured bool) string {
+	message := "已保存 iPhone/iPad 模式；现在直接拔出并连接移动设备即可"
+	if alreadyConfigured {
+		message = "当前已是 iPhone/iPad 模式；拔插到移动设备后生效"
+	}
+	if networkWakeErr != nil {
+		message += "。当前模块未提供 ADB，未启用网络唤醒；长时间锁屏时网络保持可能受限"
+	}
+	return message
 }
 
 func parseUSBNetMode(resp string) string {

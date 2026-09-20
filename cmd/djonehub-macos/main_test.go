@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestPortScore(t *testing.T) {
 	tests := []struct {
@@ -79,6 +83,18 @@ func TestParseUSBConfigRejectsUnknownLayout(t *testing.T) {
 		if _, err := parseUSBConfig(response); err == nil {
 			t.Fatalf("parseUSBConfig(%q) unexpectedly succeeded", response)
 		}
+	}
+}
+
+func TestMobileProfileMessageKeepsADBFailureNonBlockingAndVisible(t *testing.T) {
+	message := mobileProfileMessage(errors.New("ADB interface not found"), false)
+	for _, want := range []string{"已保存 iPhone/iPad 模式", "直接拔出", "未提供 ADB", "网络保持可能受限"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("mobile profile warning %q missing %q", message, want)
+		}
+	}
+	if message := mobileProfileMessage(nil, false); strings.Contains(message, "ADB") {
+		t.Fatalf("successful network wake should not show an ADB warning: %q", message)
 	}
 }
 
