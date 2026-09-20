@@ -20,6 +20,7 @@ final class CallCenter: ObservableObject {
     private var lastActiveID: String?
     private var pollInFlight = false
     private let maVoAudio = VoiceAudioService()
+    private let outgoingRingback = OutgoingRingbackPlayer()
     private var maVoAudioStarting = false
     private var maVoAudioCallID: String?
     private var maVoHostRegistered = false
@@ -44,6 +45,7 @@ final class CallCenter: ObservableObject {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        outgoingRingback.stop()
         maVoAudio.stop()
         maVoHostRegistered = false
         Task { _ = try? await api.setMaVoAudioHostEnabled(false) }
@@ -71,6 +73,14 @@ final class CallCenter: ObservableObject {
             let previousID = activeCall?.id
             activeCall = status.active
             history = status.history ?? []
+
+            if let active = status.active,
+               active.direction == "outgoing",
+               active.state == "dialing" || active.state == "alerting" {
+                outgoingRingback.start()
+            } else {
+                outgoingRingback.stop()
+            }
 
             if status.active == nil, previousID != nil {
                 if isRecording { maVoAudio.stopRecording { _ in } }
@@ -149,6 +159,7 @@ final class CallCenter: ObservableObject {
 
     func hangup() {
         isMuted = false
+        outgoingRingback.stop()
         if isRecording { maVoAudio.stopRecording { _ in } }
         isRecording = false
         maVoAudio.stop()

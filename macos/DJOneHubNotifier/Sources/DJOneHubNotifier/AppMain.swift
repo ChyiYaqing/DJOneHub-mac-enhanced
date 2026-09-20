@@ -61,6 +61,8 @@ enum SelfTest {
             from: Data(#"{"force_off":false,"services":null}"#.utf8)
         )
         precondition(!policy.forceOff && policy.services.isEmpty)
+        precondition(OutgoingRingbackPlayer.toneData.starts(with: Data("RIFF".utf8)))
+        precondition(OutgoingRingbackPlayer.toneData.count > 88_000)
         print("DJOneHubNotifier self-test passed")
     }
 }
