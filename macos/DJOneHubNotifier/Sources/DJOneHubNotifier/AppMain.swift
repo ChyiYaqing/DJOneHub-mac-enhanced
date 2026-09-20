@@ -35,6 +35,27 @@ enum SelfTest {
             timestamp: Date()
         )
         precondition(NotificationText.smsPreview(longMessage, limit: 8) == "第一行 第二行以…")
+        let incomingJSON = Data(#"""
+        {
+            "active": {
+                "id": "incoming-1",
+                "index": 1,
+                "direction": "incoming",
+                "state": "incoming",
+                "number": "10086",
+                "started_at": "2026-09-20T11:40:22.614566+08:00",
+                "updated_at": "2026-09-20T11:40:22+08:00",
+                "ended_at": null,
+                "missed": false
+            },
+            "history": null,
+            "polling": true,
+            "poll_interval_s": 3,
+            "last_poll_error": ""
+        }
+        """#.utf8)
+        let status = try! makeDJOneHubJSONDecoder().decode(CallStatus.self, from: incomingJSON)
+        precondition(status.active?.state == "incoming")
         print("DJOneHubNotifier self-test passed")
     }
 }
