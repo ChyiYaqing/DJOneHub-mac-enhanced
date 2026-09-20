@@ -698,7 +698,6 @@ private struct MessagesView: View {
     @State private var showingComposer = false
     @State private var showingClearSMSConfirmation = false
     @State private var composerRecipient = ""
-    @State private var ownNumber = ""
     @State private var autoCleanupME = true
 
     private var conversations: [Conversation] {
@@ -744,11 +743,6 @@ private struct MessagesView: View {
             HStack(spacing: 12) {
                 Text(L10n.t("短信"))
                     .font(.title3.weight(.semibold))
-                if !ownNumber.isEmpty {
-                    Text(ownNumber)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
                 Spacer()
                 if let error {
                     Text(error)
@@ -834,7 +828,6 @@ private struct MessagesView: View {
             }
         }
         .task {
-            if let identity = try? await calls.apiClient.simIdentity() { ownNumber = identity.phoneNumber }
             if let status = try? await calls.apiClient.smsStatus() { autoCleanupME = status.autoCleanupME }
             while !Task.isCancelled {
                 await load()
