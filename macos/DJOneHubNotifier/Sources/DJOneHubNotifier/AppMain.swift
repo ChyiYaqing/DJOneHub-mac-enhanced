@@ -56,6 +56,11 @@ enum SelfTest {
         """#.utf8)
         let status = try! makeDJOneHubJSONDecoder().decode(CallStatus.self, from: incomingJSON)
         precondition(status.active?.state == "incoming")
+        let policy = try! makeDJOneHubJSONDecoder().decode(
+            CellularPolicyStatus.self,
+            from: Data(#"{"force_off":false,"services":null}"#.utf8)
+        )
+        precondition(!policy.forceOff && policy.services.isEmpty)
         print("DJOneHubNotifier self-test passed")
     }
 }

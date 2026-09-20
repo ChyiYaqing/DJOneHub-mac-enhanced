@@ -2483,7 +2483,7 @@ func (a *app) persistNetworkPolicyLocked() error {
 	}
 	data, err := json.MarshalIndent(cellularPolicyStatus{
 		ForceOff: a.force4GOff,
-		Services: a.disabled4GServices,
+		Services: append([]string{}, a.disabled4GServices...),
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -2565,7 +2565,7 @@ func (a *app) cellularPolicyStatus() (cellularPolicyStatus, error) {
 	}
 	return cellularPolicyStatus{
 		ForceOff: a.force4GOff,
-		Services: append([]string(nil), a.disabled4GServices...),
+		Services: append([]string{}, a.disabled4GServices...),
 	}, nil
 }
 
@@ -2602,7 +2602,7 @@ func (a *app) setCellularPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, cellularPolicyStatus{
 		ForceOff: a.force4GOff,
-		Services: append([]string(nil), a.disabled4GServices...),
+		Services: append([]string{}, a.disabled4GServices...),
 	})
 }
 

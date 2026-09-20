@@ -429,6 +429,12 @@ struct CellularPolicyStatus: Codable, Sendable {
         case forceOff = "force_off"
         case services
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        forceOff = try container.decode(Bool.self, forKey: .forceOff)
+        services = try container.decodeIfPresent([String].self, forKey: .services) ?? []
+    }
 }
 
 struct NetworkTrafficSnapshot: Codable, Sendable {
