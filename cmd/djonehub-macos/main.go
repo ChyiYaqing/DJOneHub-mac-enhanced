@@ -252,6 +252,7 @@ type macNetInterface struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	IPv4   string `json:"ipv4"`
+	IPv6   string `json:"ipv6,omitempty"`
 	MAC    string `json:"mac,omitempty"`
 	Kind   string `json:"kind"`
 }
@@ -2091,7 +2092,72 @@ func discoverMacNetworkServices() ([]macNetworkService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取 macOS 网络服务失败: %s", strings.TrimSpace(string(out)))
 	}
-	return parseMacNetworkServices(string(out)), nil
+	services := parseMacNetworkServices(string(out))
+	hidden, err := readHiddenMacNetworkServices("/Library/Preferences/SystemConfiguration/preferences.plist")
+	if err != nil {
+		return services, nil
+	}
+	return mergeMacNetworkServices(services, hidden), nil
+}
+
+func readHiddenMacNetworkServices(path string) ([]macNetworkService, error) {
+	out, err := exec.Command("/usr/bin/plutil", "-convert", "json", "-o", "-", path).Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseMacNetworkServicesPreferences(out)
+}
+
+func parseMacNetworkServicesPreferences(data []byte) ([]macNetworkService, error) {
+	var preferences struct {
+		NetworkServices map[string]struct {
+			UserDefinedName string `json:"UserDefinedName"`
+			Interface       struct {
+				DeviceName      string `json:"DeviceName"`
+				Hardware        string `json:"Hardware"`
+				UserDefinedName string `json:"UserDefinedName"`
+			} `json:"Interface"`
+		} `json:"NetworkServices"`
+	}
+	if err := json.Unmarshal(data, &preferences); err != nil {
+		return nil, err
+	}
+	var services []macNetworkService
+	for _, item := range preferences.NetworkServices {
+		device := strings.TrimSpace(item.Interface.DeviceName)
+		name := strings.TrimSpace(item.UserDefinedName)
+		if !regexp.MustCompile(`^en\d+$`).MatchString(device) || name == "" {
+			continue
+		}
+		port := strings.TrimSpace(item.Interface.UserDefinedName)
+		if port == "" {
+			port = strings.TrimSpace(item.Interface.Hardware)
+		}
+		services = append(services, macNetworkService{Name: name, HardwarePort: port, Device: device})
+	}
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].Name == services[j].Name {
+			return services[i].Device < services[j].Device
+		}
+		return services[i].Name < services[j].Name
+	})
+	return services, nil
+}
+
+func mergeMacNetworkServices(primary, additional []macNetworkService) []macNetworkService {
+	merged := append([]macNetworkService(nil), primary...)
+	seen := make(map[string]bool)
+	for _, service := range merged {
+		seen[service.Name+"\x00"+service.Device] = true
+	}
+	for _, service := range additional {
+		key := service.Name + "\x00" + service.Device
+		if !seen[key] {
+			merged = append(merged, service)
+			seen[key] = true
+		}
+	}
+	return merged
 }
 
 func parseMacNetworkServices(output string) []macNetworkService {
@@ -2121,8 +2187,12 @@ func parseMacNetworkServices(output string) []macNetworkService {
 func isDJICellularService(service macNetworkService) bool {
 	port := strings.ToLower(strings.TrimSpace(service.HardwarePort))
 	name := strings.ToLower(strings.TrimSpace(service.Name))
-	matchesBaiwang := strings.Contains(port, "baiwang") || strings.Contains(name, "baiwang")
-	return matchesBaiwang && regexp.MustCompile(`^en\d+$`).MatchString(service.Device)
+	identity := port + " " + name
+	matchesModule := strings.Contains(identity, "baiwang") ||
+		strings.Contains(identity, "eg25g") ||
+		strings.Contains(identity, "qdc507") ||
+		strings.Contains(identity, "dji 4g")
+	return matchesModule && regexp.MustCompile(`^en\d+$`).MatchString(service.Device)
 }
 
 func setMacNetworkServiceEnabled(name string, enabled bool) error {
@@ -2145,6 +2215,21 @@ func renewMacNetworkServiceDHCP(name string) error {
 	return nil
 }
 
+func setMacNetworkServiceECMFallback(name string) error {
+	out, err := exec.Command(
+		"/usr/sbin/networksetup",
+		"-setmanual",
+		name,
+		"192.168.225.2",
+		"255.255.255.0",
+		"192.168.225.1",
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %s", name, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // ensureCellularDHCP renews DHCP on the DJI cellular network service when its
 // USB network interface has no usable IPv4 address. It runs after the USB AT
 // bridge reopens so a re-enumerated module regains its 4G fallback route
@@ -2161,12 +2246,18 @@ func (a *app) ensureCellularDHCP() {
 		log.Printf("cellular DHCP repair: %v", err)
 		return
 	}
-	// Find the DJI cellular network service. macOS may name it differently on
-	// a fresh machine ("Baiwang", "Baiwang 2", localized variants), and it may
-	// also be disabled, in which case DHCP renewals never apply.
+	interfaces := discoverMacNetworkInterfaces()
+	activeDevices := make(map[string]bool)
+	for _, item := range interfaces {
+		activeDevices[item.Name] = item.Status == "active"
+	}
+	// Find the live DJI cellular network service. macOS keeps hidden services
+	// for old USB enumerations, so a Baiwang name alone is not enough: reusing
+	// an inactive en4 after ECM reappears as en8 prevents DHCP forever. The
+	// service may also be disabled, in which case DHCP renewals never apply.
 	var target string
 	for _, service := range services {
-		if !isDJICellularService(service) {
+		if !isDJICellularService(service) || !activeDevices[service.Device] {
 			continue
 		}
 		if service.Disabled {
@@ -2183,7 +2274,7 @@ func (a *app) ensureCellularDHCP() {
 	// have created a network service for the modem's USB adapter. Create one
 	// so DHCP can be renewed automatically.
 	if target == "" {
-		device := findUnprovisionedUSBModemInterface(services)
+		device := selectUnprovisionedUSBInterface(interfaces, services)
 		if device == "" {
 			log.Printf("cellular DHCP repair: no DJI cellular network service and no unprovisioned USB interface")
 			return
@@ -2212,11 +2303,23 @@ func (a *app) ensureCellularDHCP() {
 		}
 		log.Printf("cellular DHCP repair: attempt %d/2: %v", attempt, waitErr)
 	}
-	// DHCP keeps failing: report the modem USB networking mode so a fresh
-	// machine can be diagnosed (usbnet=0 means the adapter never comes up).
+	// This EG25G firmware exposes ECM but does not always run a DHCP server.
+	// Only apply its fixed ECM subnet after the modem explicitly confirms
+	// usbnet=1; other USB networking modes may use different addressing.
 	if a.usbAT != nil {
 		if resp, err := a.usbAT.Command(`AT+QCFG="usbnet"`, 3*time.Second); err == nil {
 			log.Printf("cellular DHCP repair: AT+QCFG usbnet => %s", strings.TrimSpace(resp))
+			if parseUSBNetMode(resp) == "1" {
+				if err := setMacNetworkServiceECMFallback(target); err != nil {
+					log.Printf("cellular DHCP repair: ECM fallback for %s failed: %v", target, err)
+					return
+				}
+				if info, err := waitForMacIPv4Service(target, 5*time.Second); err == nil {
+					log.Printf("cellular DHCP repair: ECM fallback %s -> %s via 192.168.225.1", target, info.Address)
+				} else {
+					log.Printf("cellular DHCP repair: ECM fallback for %s did not become usable: %v", target, err)
+				}
+			}
 		}
 	}
 }
@@ -2236,7 +2339,7 @@ func selectUnprovisionedUSBInterface(interfaces []macNetInterface, services []ma
 		hasService[service.Device] = true
 	}
 	for _, item := range interfaces {
-		if item.Kind != "ethernet" || item.Name == "en0" || !isLocallyAdministeredMAC(item.MAC) {
+		if item.Kind != "ethernet" || item.Status != "active" || item.Name == "en0" || !isLocallyAdministeredMAC(item.MAC) {
 			continue
 		}
 		if !hasService[item.Name] {
@@ -2260,7 +2363,7 @@ func isLocallyAdministeredMAC(mac string) bool {
 }
 
 func createCellularNetworkService(device string) (string, error) {
-	for _, name := range []string{"Baiwang", "Baiwang 2", "DJI 4G"} {
+	for _, name := range []string{"Baiwang", "Baiwang 2", "DJI 4G", "Baiwang ECM", "DJI 4G ECM"} {
 		if err := createMacNetworkService(name, device); err != nil {
 			continue
 		}
@@ -2826,6 +2929,16 @@ func discoverMacNetworkInterfaces() []macNetInterface {
 					item.IPv4 = fields[1]
 				}
 			}
+			if strings.HasPrefix(line, "inet6 ") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					candidate := strings.Split(fields[1], "%")[0]
+					address := net.ParseIP(candidate)
+					if address != nil && !address.IsUnspecified() && !address.IsLinkLocalUnicast() {
+						item.IPv6 = candidate
+					}
+				}
+			}
 		}
 		interfaces = append(interfaces, item)
 	}
@@ -2914,8 +3027,13 @@ func isUsableUSBTrafficInterface(item macNetInterface) bool {
 	if item.Kind != "ethernet" || item.Name == "en0" || item.Status != "active" {
 		return false
 	}
-	address := net.ParseIP(item.IPv4)
-	return address != nil && !address.IsUnspecified() && !address.IsLinkLocalUnicast()
+	for _, raw := range []string{item.IPv4, item.IPv6} {
+		address := net.ParseIP(raw)
+		if address != nil && !address.IsUnspecified() && !address.IsLinkLocalUnicast() {
+			return true
+		}
+	}
+	return false
 }
 
 func discoverMacInterfaceCounters() (map[string]networkByteCounters, error) {

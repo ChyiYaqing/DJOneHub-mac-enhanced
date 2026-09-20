@@ -314,8 +314,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             consecutiveErrors += 1
             if consecutiveErrors == 5 {
+                // A loaded backend may only be waiting for USB re-enumeration.
+                // Restarting it here discards an incoming call that the modem
+                // already reported and makes the notification disappear.
                 await ensureModuleServices()
-                await restartModuleServices()
                 panel.show(
                     .error(message: error.localizedDescription),
                     onReject: {},
@@ -633,6 +635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showIncoming(_ call: CallRecord) {
+        NSLog("DJOneHub incoming call notification: %@", NotificationText.displayNumber(call.number))
         ringtoneStore.startRinging()
         panel.show(
             .incoming(
