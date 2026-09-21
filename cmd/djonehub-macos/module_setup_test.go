@@ -68,6 +68,21 @@ func TestUSBCFGErrorIsTransientDuringReenumeration(t *testing.T) {
 	}
 }
 
+// normalizeATResponse strips the framing CRLF, so a refusal reaches callers as
+// a bare ERROR token. Missing it makes a rejected write look applied.
+func TestBareErrorResponseIsDetected(t *testing.T) {
+	for _, resp := range []string{"ERROR", "\r\nERROR\r\n", "error", "  ERROR  "} {
+		if !atResponseIsError(resp) {
+			t.Fatalf("bare refusal %q must be detected as an AT error", resp)
+		}
+	}
+	for _, resp := range []string{"OK", "+QCFG: \"usbcfg\",0x2C7C,0x125,1,1,1,1,1,0,1\r\nOK"} {
+		if atResponseIsError(resp) {
+			t.Fatalf("successful response %q must not be classified as an error", resp)
+		}
+	}
+}
+
 func TestReadyModuleSetupInvalidatesAfterUSBReenumeration(t *testing.T) {
 	a := &app{}
 	a.setModuleSetup(moduleSetupStatus{State: "ready", Summary: "ready"})

@@ -2797,16 +2797,39 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if mode == "mobile" {
-		if _, err := a.runATCommand("AT+QPCMV=0", 5*time.Second); err != nil {
+		// A module with no active voice stream answers ERROR here. That is not a
+		// failure: there is simply nothing to stop, and treating it as one would
+		// block every mobile switch on such firmware.
+		response, err := a.runATCommand("AT+QPCMV=0", 5*time.Second)
+		if err != nil {
 			writeError(w, http.StatusBadGateway, fmt.Sprintf("关闭当前语音流失败: %v", err))
 			return
 		}
+		if atResponseIsError(response) {
+			log.Printf("stop voice stream before USB profile change (continuing): %s", strings.TrimSpace(response))
+		}
 	}
-	if _, err := a.runATCommand(config.withUAC(wantUAC), 8*time.Second); err != nil {
+	// The modem reports a rejected write in the AT payload, not as a transport
+	// error, so an unchecked write makes a refused profile change look applied.
+	writeResponse, err := a.runATCommand(config.withUAC(wantUAC), 8*time.Second)
+	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("写入 USB 配置失败: %v", err))
 		return
 	}
-	updated := usbConfig{fields: append(append([]string(nil), config.fields[:8]...), map[bool]string{true: "1", false: "0"}[wantUAC])}
+	if atResponseIsError(writeResponse) {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("模块拒绝了 USB 配置写入: %s", strings.TrimSpace(writeResponse)))
+		return
+	}
+	// Read the profile back: only the module can confirm the new value persisted.
+	updated, updatedRaw, err := a.readUSBProfile()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("已写入 USB 配置，但回读确认失败: %v", err))
+		return
+	}
+	if updated.uacEnabled() != wantUAC {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("USB 配置写入未生效，模块回读仍为 %s", updatedRaw))
+		return
+	}
 	if mode == "mobile" {
 		a.usbProfileMobileArmed = true
 		if err := a.persistUSBProfileIntentLocked(); err != nil {
@@ -2817,7 +2840,7 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 		// loop rebooting the module immediately after this successful write.
 		a.lostSignalCount = 0
 		a.lastModemReboot = time.Now()
-		writeJSON(w, http.StatusAccepted, profileStatus(updated, raw, true, mobileProfileMessage(networkWakeErr, false)))
+		writeJSON(w, http.StatusAccepted, profileStatus(updated, updatedRaw, true, mobileProfileMessage(networkWakeErr, false)))
 		return
 	}
 	a.usbProfileMobileArmed = false
@@ -2829,7 +2852,7 @@ func (a *app) setUSBProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("已写入 Mac 模式，但模块重启失败: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusAccepted, profileStatus(updated, raw, true, "已恢复 Mac 完整模式，模块正在重新连接"))
+	writeJSON(w, http.StatusAccepted, profileStatus(updated, updatedRaw, true, "已恢复 Mac 完整模式，模块正在重新连接"))
 }
 
 func mobileProfileMessage(networkWakeErr error, alreadyConfigured bool) string {

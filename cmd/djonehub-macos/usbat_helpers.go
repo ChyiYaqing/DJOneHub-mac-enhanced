@@ -16,6 +16,12 @@ func atResponseHasPrompt(resp string) bool {
 
 func atResponseIsError(resp string) bool {
 	normalized := strings.ToUpper(strings.ReplaceAll(resp, "\r\n", "\n"))
+	// normalizeATResponse strips the leading CRLF, so a modem that answers with
+	// nothing but ERROR reaches callers as a bare token without the newline the
+	// other cases rely on.
+	if strings.TrimSpace(normalized) == "ERROR" {
+		return true
+	}
 	return strings.Contains(normalized, "\nERROR\n") ||
 		strings.HasSuffix(normalized, "\nERROR") ||
 		strings.Contains(normalized, "+CME ERROR:") ||
