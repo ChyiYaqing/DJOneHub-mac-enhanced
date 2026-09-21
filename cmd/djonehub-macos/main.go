@@ -2687,16 +2687,24 @@ type usbProfileIntent struct {
 	MobileArmed bool `json:"mobile_armed"`
 }
 
+func (a *app) ensureUSBProfileIntentPathLocked() error {
+	if a.usbProfileIntentPath != "" {
+		return nil
+	}
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	a.usbProfileIntentPath = filepath.Join(configDir, "DJOneHub", "usb-profile-intent.json")
+	return nil
+}
+
 func (a *app) loadUSBProfileIntentLocked() error {
 	if a.usbProfileIntentLoaded {
 		return nil
 	}
-	if a.usbProfileIntentPath == "" {
-		configDir, err := os.UserConfigDir()
-		if err != nil {
-			return err
-		}
-		a.usbProfileIntentPath = filepath.Join(configDir, "DJOneHub", "usb-profile-intent.json")
+	if err := a.ensureUSBProfileIntentPathLocked(); err != nil {
+		return err
 	}
 	var intent usbProfileIntent
 	data, err := os.ReadFile(a.usbProfileIntentPath)
@@ -2714,7 +2722,10 @@ func (a *app) loadUSBProfileIntentLocked() error {
 }
 
 func (a *app) persistUSBProfileIntentLocked() error {
-	if err := a.loadUSBProfileIntentLocked(); err != nil {
+	// Only the path is needed here. Loading would overwrite the intent the
+	// caller just set with the previous file contents and then write that
+	// stale value straight back.
+	if err := a.ensureUSBProfileIntentPathLocked(); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(a.usbProfileIntentPath), 0o700); err != nil {
@@ -2728,7 +2739,12 @@ func (a *app) persistUSBProfileIntentLocked() error {
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(temporary, a.usbProfileIntentPath)
+	if err := os.Rename(temporary, a.usbProfileIntentPath); err != nil {
+		return err
+	}
+	// What is on disk now matches memory, so a later load must not re-read it.
+	a.usbProfileIntentLoaded = true
+	return nil
 }
 
 func (a *app) usbProfile(w http.ResponseWriter, _ *http.Request) {

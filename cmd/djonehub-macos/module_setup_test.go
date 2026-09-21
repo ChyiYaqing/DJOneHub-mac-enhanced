@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -112,6 +113,33 @@ func TestParseIMSConfiguration(t *testing.T) {
 	configuration, capability, err = parseIMSConfiguration(`+QCFG: "ims",2,0`)
 	if err != nil || configuration != 2 || capability != 0 {
 		t.Fatalf("disabled IMS parse = %d,%d err=%v", configuration, capability, err)
+	}
+}
+
+// setUSBProfile sets the intent and persists it without loading first, so
+// persisting must not pull the previous value back over the new one.
+func TestPersistUSBProfileIntentWithoutPriorLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usb-profile-intent.json")
+	if err := os.WriteFile(path, []byte(`{"mobile_armed":false}`), 0o600); err != nil {
+		t.Fatalf("seed intent file: %v", err)
+	}
+
+	// Exactly what the handler does: set the new intent, then persist.
+	a := &app{usbProfileIntentPath: path}
+	a.usbProfileMobileArmed = true
+	if err := a.persistUSBProfileIntentLocked(); err != nil {
+		t.Fatalf("persist mobile intent: %v", err)
+	}
+	if !a.usbProfileMobileArmed {
+		t.Fatal("persisting must not overwrite the intent it was asked to save")
+	}
+
+	reloaded := &app{usbProfileIntentPath: path}
+	if err := reloaded.loadUSBProfileIntentLocked(); err != nil {
+		t.Fatalf("reload intent: %v", err)
+	}
+	if !reloaded.usbProfileMobileArmed {
+		t.Fatal("an iPhone/iPad selection must survive a backend restart")
 	}
 }
 
